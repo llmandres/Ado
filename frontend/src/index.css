@@ -1,0 +1,17 @@
+.container {
+  font-family: Arial, sans-serif;
+  margin: 2rem;
+}
+
+.form {
+  margin-bottom: 1rem;
+}
+
+li {
+  cursor: pointer;
+}
+
+.done {
+  text-decoration: line-through;
+  color: #888;
+} 
