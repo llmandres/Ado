@@ -1,9 +1,23 @@
-const API = 'http://0.0.0.0:8080 ';
+// URL base del backend. Puedes sobreescribirla con la variable de entorno VITE_API al compilar con Vite.
+const API = import.meta.env.VITE_API?.replace(/\/$/, '') || 'http://localhost:8000'
 
 export async function getSongs() {
+  // cache en localStorage durante 10 min para evitar peticiones redundantes
+  const cacheKey = 'songs_cache_v1';
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey));
+    if (cached && Date.now() - cached.ts < 10 * 60 * 1000) {
+      return cached.data;
+    }
+  } catch {}
+
   const res = await fetch(`${API}/songs`);
   if (!res.ok) throw new Error('Error al obtener canciones');
-  return res.json();
+  const data = await res.json();
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data }));
+  } catch {}
+  return data;
 }
 
 export async function uploadSong(title, mp3File, coverFile, description) {

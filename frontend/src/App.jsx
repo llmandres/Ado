@@ -30,6 +30,7 @@ export default function App() {
     if (!title.trim() || !mp3File) return;
     try {
       await uploadSong(title.trim(), mp3File, coverFile, description.trim());
+      try { localStorage.removeItem('songs_cache_v1'); } catch {}
       setTitle('');
       setMp3File(null);
       setCoverFile(null);
