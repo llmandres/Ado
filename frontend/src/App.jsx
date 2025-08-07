@@ -575,25 +575,28 @@ export default function App() {
             </button>
           </div>
 
-          {/* Music Filters - Only visible when in songs view */}
+          {/* Premium Music Filters - Only visible when in songs view */}
           {view === 'songs' && (
             <div className="filter-pills">
               <button 
-                className={`filter-pill ${filter === 'all' ? 'active' : ''}`}
+                className={`filter-pill filter-pill-with-icon ${filter === 'all' ? 'active' : ''}`}
                 onClick={() => setFilter('all')}
               >
+                <span className="filter-icon">🎵</span>
                 All
               </button>
               <button 
-                className={`filter-pill ${filter === 'original' ? 'active' : ''}`}
+                className={`filter-pill filter-pill-with-icon ${filter === 'original' ? 'active' : ''}`}
                 onClick={() => setFilter('original')}
               >
+                <span className="filter-icon">✨</span>
                 Originals
               </button>
               <button 
-                className={`filter-pill ${filter === 'cover' ? 'active' : ''}`}
+                className={`filter-pill filter-pill-with-icon ${filter === 'cover' ? 'active' : ''}`}
                 onClick={() => setFilter('cover')}
               >
+                <span className="filter-icon">🎨</span>
                 Covers
               </button>
             </div>
