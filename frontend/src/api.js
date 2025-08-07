@@ -1,6 +1,9 @@
 // URL base del backend. Puedes sobreescribirla con la variable de entorno VITE_API al compilar con Vite.
 const API = import.meta.env.VITE_API?.replace(/\/$/, '') || 'http://localhost:8000'
 
+// Export API_BASE_URL for use in other components
+export const API_BASE_URL = API;
+
 export async function getSongs() {
   // cache en localStorage durante 10 min para evitar peticiones redundantes
   const cacheKey = 'songs_cache_v1';

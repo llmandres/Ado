@@ -6,6 +6,7 @@ from typing import List, Optional
 from pathlib import Path
 from uuid import uuid4
 import os
+from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -34,6 +35,7 @@ AUDIO_BUCKET = "songs"
 COVER_BUCKET = "covers"
 
 
+# ===== MODELS =====
 class Song(BaseModel):
     id: str
     title: str
@@ -42,12 +44,84 @@ class Song(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = 'original'
 
+class NewsPost(BaseModel):
+    id: str
+    title: str
+    content: str
+    excerpt: Optional[str] = None
+    category: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    author: Optional[str] = None
+    image_url: Optional[str] = None
+    published_date: datetime
+    is_featured: bool = False
+    tags: List[str] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class NewsCategory(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+class NewsTag(BaseModel):
+    id: str
+    name: str
+    color: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+# ===== DATABASE FUNCTIONS =====
+
+# Songs functions
 def insert_song_db(row: dict):
     supabase.table("songs").insert(row).execute()
 
 def fetch_song_row(song_id: str):
     res = supabase.table("songs").select("*").eq("id", song_id).single().execute()
     return res.data if res.data else None
+
+# News functions
+def insert_news_post(row: dict):
+    result = supabase.table("news_posts").insert(row).execute()
+    return result.data[0] if result.data else None
+
+def fetch_news_post(post_id: str):
+    res = supabase.table("news_posts").select("*").eq("id", post_id).single().execute()
+    return res.data if res.data else None
+
+def fetch_all_news():
+    res = supabase.table("news_posts").select("*").order("published_date", desc=True).execute()
+    return res.data if res.data else []
+
+def fetch_news_by_category(category: str):
+    res = supabase.table("news_posts").select("*").eq("category", category).order("published_date", desc=True).execute()
+    return res.data if res.data else []
+
+def fetch_featured_news():
+    res = supabase.table("news_posts").select("*").eq("is_featured", True).order("published_date", desc=True).execute()
+    return res.data if res.data else []
+
+# Categories functions
+def fetch_all_categories():
+    res = supabase.table("news_categories").select("*").order("name", desc=False).execute()
+    return res.data if res.data else []
+
+def insert_category(row: dict):
+    result = supabase.table("news_categories").insert(row).execute()
+    return result.data[0] if result.data else None
+
+# Tags functions
+def fetch_all_tags():
+    res = supabase.table("news_tags").select("*").order("name", desc=False).execute()
+    return res.data if res.data else []
+
+def insert_tag(row: dict):
+    result = supabase.table("news_tags").insert(row).execute()
+    return result.data[0] if result.data else None
 
 # Endpoints
 
@@ -179,3 +253,213 @@ async def update_song(
 
     new_row = fetch_song_row(song_id)
     return Song(id=new_row["id"], title=new_row["title"], audio_url=new_row["audio_url"], cover_url=new_row.get("cover_url"), description=new_row.get("description"), category=new_row.get("category"))
+
+# ===== NEWS ENDPOINTS =====
+
+@app.post("/news", response_model=NewsPost, status_code=201)
+async def create_news_post(
+    title: str = Form(...),
+    content: str = Form(...),
+    excerpt: str | None = Form(None),
+    category: str = Form(...),
+    source_url: str | None = Form(None),
+    source_name: str | None = Form(None),
+    author: str | None = Form(None),
+    published_date: str = Form(...),  # ISO format string
+    is_featured: bool = Form(False),
+    tags: str = Form(""),  # Comma-separated tags
+    image: UploadFile | None = File(None)
+):
+    """Creates a new news post"""
+    
+    post_id = str(uuid4())
+    
+    # Handle image upload if provided
+    image_url = None
+    if image is not None:
+        if not image.filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+            raise HTTPException(400, "Image must be JPG, PNG, or WebP")
+        image_ext = Path(image.filename).suffix.lower()
+        image_path = f"news/{post_id}{image_ext}"
+        image_bytes = await image.read()
+        try:
+            supabase.storage.from_("covers").upload(  # Using covers bucket for now
+                image_path,
+                image_bytes,
+                {"content-type": f"image/{image_ext[1:]}"}
+            )
+            image_url = supabase.storage.from_("covers").get_public_url(image_path)
+        except Exception as e:
+            raise HTTPException(500, f"Error uploading image: {e}")
+    
+    # Parse tags
+    tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else []
+    
+    # Parse published date
+    try:
+        pub_date = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
+    except ValueError:
+        raise HTTPException(400, "Invalid date format. Use ISO format.")
+    
+    row = {
+        "id": post_id,
+        "title": title,
+        "content": content,
+        "excerpt": excerpt,
+        "category": category,
+        "source_url": source_url,
+        "source_name": source_name,
+        "author": author,
+        "image_url": image_url,
+        "published_date": pub_date.isoformat(),
+        "is_featured": is_featured,
+        "tags": tag_list,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat()
+    }
+    
+    insert_news_post(row)
+    
+    return NewsPost(**{k: v for k, v in row.items() if k in NewsPost.__fields__})
+
+@app.get("/news", response_model=List[NewsPost])
+def list_news(category: str | None = None, featured: bool | None = None):
+    """Lists all news posts with optional filtering"""
+    if featured:
+        data = fetch_featured_news()
+    elif category:
+        data = fetch_news_by_category(category)
+    else:
+        data = fetch_all_news()
+    
+    return [NewsPost(**row) for row in data]
+
+@app.get("/news/{post_id}", response_model=NewsPost)
+def get_news_post(post_id: str):
+    """Gets a specific news post by ID"""
+    row = fetch_news_post(post_id)
+    if row:
+        return NewsPost(**row)
+    raise HTTPException(404, "News post not found")
+
+@app.patch("/news/{post_id}", response_model=NewsPost)
+async def update_news_post(
+    post_id: str,
+    title: str | None = Form(None),
+    content: str | None = Form(None),
+    excerpt: str | None = Form(None),
+    category: str | None = Form(None),
+    source_url: str | None = Form(None),
+    source_name: str | None = Form(None),
+    author: str | None = Form(None),
+    is_featured: bool | None = Form(None),
+    tags: str | None = Form(None),
+    image: UploadFile | None = File(None)
+):
+    """Updates an existing news post"""
+    row = fetch_news_post(post_id)
+    if not row:
+        raise HTTPException(404, "News post not found")
+    
+    updates = {"updated_at": datetime.now().isoformat()}
+    
+    if title: updates["title"] = title
+    if content: updates["content"] = content
+    if excerpt is not None: updates["excerpt"] = excerpt
+    if category: updates["category"] = category
+    if source_url is not None: updates["source_url"] = source_url
+    if source_name is not None: updates["source_name"] = source_name
+    if author is not None: updates["author"] = author
+    if is_featured is not None: updates["is_featured"] = is_featured
+    if tags is not None:
+        tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else []
+        updates["tags"] = tag_list
+    
+    # Handle image replacement
+    if image is not None:
+        if not image.filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+            raise HTTPException(400, "Image must be JPG, PNG, or WebP")
+        image_ext = Path(image.filename).suffix.lower()
+        image_path = f"news/{post_id}{image_ext}"
+        image_bytes = await image.read()
+        
+        # Remove old image if exists
+        # (We'd need to store the image path in the DB to properly clean up)
+        
+        supabase.storage.from_("covers").upload(
+            image_path,
+            image_bytes,
+            {"content-type": f"image/{image_ext[1:]}"}
+        )
+        image_url = supabase.storage.from_("covers").get_public_url(image_path)
+        updates["image_url"] = image_url
+    
+    if updates:
+        supabase.table("news_posts").update(updates).eq("id", post_id).execute()
+    
+    new_row = fetch_news_post(post_id)
+    return NewsPost(**new_row)
+
+@app.delete("/news/{post_id}")
+def delete_news_post(post_id: str):
+    """Deletes a news post"""
+    row = fetch_news_post(post_id)
+    if not row:
+        raise HTTPException(404, "News post not found")
+    
+    supabase.table("news_posts").delete().eq("id", post_id).execute()
+    return {"message": "News post deleted successfully"}
+
+# ===== CATEGORY ENDPOINTS =====
+
+@app.get("/news/categories", response_model=List[NewsCategory])
+def list_categories():
+    """Lists all news categories"""
+    data = fetch_all_categories()
+    return [NewsCategory(**row) for row in data]
+
+@app.post("/news/categories", response_model=NewsCategory, status_code=201)
+def create_category(
+    name: str = Form(...),
+    description: str | None = Form(None),
+    color: str | None = Form(None),
+    icon: str | None = Form(None)
+):
+    """Creates a new news category"""
+    category_id = str(uuid4())
+    row = {
+        "id": category_id,
+        "name": name,
+        "description": description,
+        "color": color,
+        "icon": icon,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    result = insert_category(row)
+    return NewsCategory(**result)
+
+# ===== TAG ENDPOINTS =====
+
+@app.get("/news/tags", response_model=List[NewsTag])
+def list_tags():
+    """Lists all news tags"""
+    data = fetch_all_tags()
+    return [NewsTag(**row) for row in data]
+
+@app.post("/news/tags", response_model=NewsTag, status_code=201)
+def create_tag(
+    name: str = Form(...),
+    color: str | None = Form(None)
+):
+    """Creates a new news tag"""
+    tag_id = str(uuid4())
+    row = {
+        "id": tag_id,
+        "name": name,
+        "color": color,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    result = insert_tag(row)
+    return NewsTag(**result)
